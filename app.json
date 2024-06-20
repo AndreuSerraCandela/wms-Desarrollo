@@ -1,0 +1,44 @@
+{
+  "id": "244a58af-24da-40ee-ad9a-b34c7094f0c2",
+  "name": "WMS",
+  "publisher": "Excelia",
+  "version": "1.0.0.32",
+  "brief": "",
+  "description": "",
+  "privacyStatement": "",
+  "EULA": "",
+  "help": "",
+  "url": "",
+  "logo": "",
+  "dependencies": [ {
+    "id": "d8ad3e42-9dee-4251-b49d-e051dcde111e",
+    "name": "Tallas y Colores",
+    "publisher": "Excelia",
+    "version": "1.0.0.70"
+  },
+  {
+    "id": "fc4c7f52-7aec-4e3f-a42d-422104a9d236",
+    "name": "CORE_CALZADOS",
+    "publisher": "excelia S.L.",
+    "version": "23.0.1.46"
+  }
+],
+  "screenshots": [],
+  "platform": "1.0.0.0",
+  "application": "23.0.0.0",
+  
+  "idRanges": [
+    {
+      "from": 50000,
+      "to": 59999
+    }
+  ],
+  "resourceExposurePolicy": {
+    "allowDebugging": true,
+    "allowDownloadingSource": true,
+    "includeSourceInSymbolFile": true
+  },
+  "runtime": "12.0",  
+  "features": ["GenerateCaptions","TranslationFile"], 
+  "supportedLocales": ["es-ES","en-US"]
+}

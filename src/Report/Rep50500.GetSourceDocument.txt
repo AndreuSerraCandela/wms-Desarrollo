@@ -1,0 +1,480 @@
+report 50500 GetSourceDocument
+{
+    UsageCategory = ReportsAndAnalysis;
+    ApplicationArea = All;
+    // DefaultRenderingLayout = LayoutName;
+    //COPIA report 5753 "Get Source Documents"
+
+    dataset
+    {
+        dataitem(PfsSalesSelectCust; Customer)
+        {
+            DataItemTableView = sorting("No.");
+
+            trigger OnPreDataItem() //PfsSalesSelectCust
+            begin
+                CurrReport.BREAK; // Pfs7.20
+            end;
+        }
+        dataitem(PfsSalesSelectItem; Item)
+        {
+            DataItemTableView = sorting("No.");
+            trigger OnPreDataItem() //PfsSalesSelectItem
+            begin
+
+                // Pfs7.10
+                CurrReport.BREAK;
+                // *
+            end;
+        }
+        dataitem("Warehouse Request"; "Warehouse Request")
+        {
+            DataItemTableView = where("Document Status" = const(Released), "Completely Handled" = filter(false));
+            RequestFilterFields = "Source Document", "Source No.";
+
+
+            dataitem("Sales Header"; "Sales Header")
+            {
+                DataItemLink = "Document Type" = field("Source Subtype"), "No." = field("Source No.");
+                DataItemTableView = sorting("Document Type", "No.");
+
+                dataitem("Sales Line"; "Sales Line")
+                {
+                    DataItemLink = "Document Type" = field("Document Type"), "Document No." = field("No.");
+                    DataItemTableView = sorting("Document Type", "Document No.", "Line No.");
+
+                    trigger OnAfterGetRecord()
+                    var
+                        SalesWarehouseMgt: Codeunit "Sales Warehouse Mgt.";
+                        IsHandled: Boolean;
+                    begin
+                        IsHandled := false;
+                        //   OnBeforeSalesLineOnAfterGetRecord("Sales Line", "Warehouse Request", RequestType, IsHandled, SkipBlockedItem);
+                        if IsHandled then
+                            CurrReport.Skip();
+
+                        //    VerifySalesItemNotBlocked("Sales Header", "Sales Line"); TODO
+                        if not SkipWarehouseRequest("Sales Line", "Warehouse Request") then
+                            case RequestType of
+                                RequestType::Receive:
+                                    if SalesWarehouseMgt.CheckIfSalesLine2ReceiptLine("Sales Line") then begin
+                                        // OnSalesLineOnAfterGetRecordOnBeforeCreateRcptHeader(
+                                        //   "Sales Line", "Warehouse Request", WhseReceiptHeader, WhseHeaderCreated, OneHeaderCreated);
+                                        if not OneHeaderCreated and not WhseHeaderCreated then begin
+                                            CreateReceiptHeader();
+                                            //  OnSalesLineOnAfterCreateRcptHeader(WhseReceiptHeader, WhseHeaderCreated, "Sales Header", "Sales Line", "Warehouse Request");
+                                        end;
+                                        if not SalesWarehouseMgt.SalesLine2ReceiptLine(WhseReceiptHeader, "Sales Line") then
+                                            ErrorOccured := true;
+                                        LineCreated := true;
+                                    end;
+                                RequestType::Ship:
+                                    if SalesWarehouseMgt.CheckIfFromSalesLine2ShptLine("Sales Line", ReservedFromStock) then begin
+                                        IsHandled := false;
+                                        // OnSalesLineOnAfterGetRecordOnBeforeCheckCustBlocked(Cust, IsHandled);
+                                        if not IsHandled then
+                                            if Cust.Blocked <> Cust.Blocked::" " then begin
+                                                if not SalesHeaderCounted then begin
+                                                    SkippedSourceDoc += 1;
+                                                    SalesHeaderCounted := true;
+                                                end;
+                                                CurrReport.Skip();
+                                            end;
+                                        IsHandled := false;
+                                        // OnSalesLineOnAfterGetRecordOnBeforeCreateShptHeader(
+                                        //   "Sales Line", "Warehouse Request", WhseShptHeader, WhseHeaderCreated, OneHeaderCreated, IsHandled);
+                                        if not IsHandled then begin
+                                            if not OneHeaderCreated and not WhseHeaderCreated then begin
+                                                CreateShptHeader();
+                                                WhseShptHeader."Shipment Date" := "Sales Header"."Shipment Date";
+                                                WhseShptHeader.Modify();
+                                                //   OnSalesLineOnAfterCreateShptHeader(WhseShptHeader, WhseHeaderCreated, "Sales Header", "Sales Line", "Warehouse Request");
+                                            end;
+                                            if not CreateActivityFromSalesLine2ShptLine(WhseShptHeader, "Sales Line") then
+                                                ErrorOccured := true;
+                                            LineCreated := true;
+                                        end;
+                                    end;
+                            end;
+                    end;
+
+                    trigger OnPostDataItem()
+                    begin
+                        OnBeforeOnPostDataItemSalesLine(WhseReceiptHeader, RequestType, OneHeaderCreated, WhseHeaderCreated, LineCreated, HideDialog);
+                        if OneHeaderCreated or WhseHeaderCreated then begin
+                            UpdateReceiptHeaderStatus();
+                            CheckFillQtyToHandle();
+                        end;
+
+                        OnAfterProcessDocumentLine(WhseShptHeader, "Warehouse Request", LineCreated, WhseReceiptHeader, OneHeaderCreated, WhseHeaderCreated);
+                    end;
+
+                    trigger OnPreDataItem()
+                    begin
+                        SetSalesLineFilters("Sales Line", "Warehouse Request");
+
+                        OnAfterSalesLineOnPreDataItem("Sales Line", OneHeaderCreated, WhseShptHeader, WhseReceiptHeader);
+                    end;
+                }
+
+
+                trigger OnAfterGetRecord()
+                var
+                    SkipRecord: Boolean;
+                    BreakReport: Boolean;
+                    IsHandled: Boolean;
+                begin
+                    IsHandled := false;
+                    //OnBeforeSalesHeaderOnAfterGetRecord("Sales Header", SalesHeaderCounted, IsHandled);
+                    if IsHandled then
+                        CurrReport.Skip();
+
+                    "Sales Header".TestField("Sales Header"."Sell-to Customer No.");
+                    Cust.Get("Sales Header"."Sell-to Customer No.");
+                    if not SkipBlockedCustomer then
+                        Cust.CheckBlockedCustOnDocs(Cust, "Sales Header"."Document Type", false, false);
+                    SalesHeaderCounted := false;
+
+                    BreakReport := false;
+                    SkipRecord := false;
+                    //  OnAfterSalesHeaderOnAfterGetRecord("Sales Header", SkipRecord, BreakReport, "Warehouse Request");
+                    if BreakReport then
+                        CurrReport.Break();
+                    if SkipRecord then
+                        CurrReport.Skip();
+                end;
+
+                trigger OnPreDataItem()
+                begin
+                    if "Warehouse Request"."Source Type" <> Database::"Sales Line" then
+                        CurrReport.Break();
+
+                    //  OnAfterSalesHeaderOnPreDataItem("Sales Header");
+                end;
+
+                trigger OnPostDataItem()
+                begin
+                    //   OnAfterPostDataItemSalesHeader("Warehouse Request", "Sales Header");
+                end;
+            }
+
+
+
+            ///** begin //"Warehouse Request"
+            trigger OnPreDataItem() //"Warehouse Request"
+            begin
+                if OneHeaderCreated then begin
+                    case RequestType of
+                        RequestType::Receive:
+                            Type := Type::Inbound;
+                        RequestType::Ship:
+                            Type := Type::Outbound;
+                    end;
+                    SetRange(Type, Type);
+                end;
+
+                // OnAfterWarehouseRequestOnPreDataItem("Warehouse Request");
+            end;
+
+            trigger OnAfterGetRecord() //"Warehouse Request"
+            var
+                WhseSetup: Record "Warehouse Setup";
+                SkipRecord: Boolean;
+                BreakReport: Boolean;
+            begin
+                WhseHeaderCreated := false;
+                //  OnBeforeWarehouseRequestOnAfterGetRecord(
+                //"Warehouse Request", WhseHeaderCreated, SkipRecord, BreakReport, RequestType, WhseReceiptHeader, WhseShptHeader, OneHeaderCreated);
+                if BreakReport then
+                    CurrReport.Break();
+                if SkipRecord then
+                    CurrReport.Skip();
+
+                case Type of
+                    Type::Inbound:
+                        begin
+                            if not Location.RequireReceive("Location Code") then begin
+                                if "Location Code" = '' then
+                                    WhseSetup.TestField("Require Receive");
+                                Location.Get("Location Code");
+                                Location.TestField("Require Receive");
+                            end;
+                            if not OneHeaderCreated then
+                                RequestType := RequestType::Receive;
+                        end;
+                    Type::Outbound:
+                        begin
+                            if not Location.RequireShipment("Location Code") then begin
+                                if "Location Code" = '' then
+                                    WhseSetup.TestField("Require Shipment");
+                                Location.Get("Location Code");
+                                Location.TestField("Require Shipment");
+                            end;
+                            if not OneHeaderCreated then
+                                RequestType := RequestType::Ship;
+                        end;
+                end;
+            end;
+
+            trigger OnPostDataItem()//"Warehouse Request"
+            var
+                IsHandled: Boolean;
+            begin
+                IsHandled := not (WhseHeaderCreated or OneHeaderCreated);
+                //OnBeforeCreateWhseDocuments(WhseReceiptHeader, WhseShptHeader, IsHandled, "Warehouse Request");
+                if not IsHandled then begin
+                    //     OnAfterCreateWhseDocuments(WhseReceiptHeader, WhseShptHeader, WhseHeaderCreated, "Warehouse Request");
+                    WhseShptHeader.SortWhseDoc();
+                    WhseReceiptHeader.SortWhseDoc();
+                end;
+
+                //  OnWarehouseRequestOnAfterOnPostDataItem(WhseShptHeader);
+            end;
+
+            ///** end //"Warehouse Request"
+        }
+    }
+
+
+
+    requestpage
+    {
+        AboutTitle = 'Teaching tip title';
+        AboutText = 'Teaching tip content';
+        layout
+        {
+            area(Content)
+            {
+                group(GroupName)
+                {
+
+                }
+            }
+        }
+
+        actions
+        {
+            area(processing)
+            {
+                action(LayoutName)
+                {
+                    ApplicationArea = All;
+
+                }
+            }
+        }
+    }
+
+
+    procedure SetHideDialog(NewHideDialog: Boolean)
+    begin
+        HideDialog := NewHideDialog;
+    end;
+
+    procedure SetOneCreatedShptHeader(WhseShptHeader2: Record "Warehouse Shipment Header")
+    begin
+        RequestType := RequestType::Ship;
+        WhseShptHeader := WhseShptHeader2;
+        if WhseShptHeader.Find() then
+            OneHeaderCreated := true;
+    end;
+
+    procedure SetOneCreatedReceiptHeader(WhseReceiptHeader2: Record "Warehouse Receipt Header")
+    begin
+        RequestType := RequestType::Receive;
+        WhseReceiptHeader := WhseReceiptHeader2;
+        IF WhseReceiptHeader.FIND THEN
+            OneHeaderCreated := TRUE;
+    end;
+
+    procedure SetDoNotFillQtytoHandle(DoNotFillQtytoHandle2: Boolean)
+    begin
+        DoNotFillQtytoHandle := DoNotFillQtytoHandle2;
+
+    end;
+
+
+    procedure GetLastShptHeader(VAR WhseShptHeader2: Record "Warehouse Shipment Header")
+    begin
+
+        RequestType := RequestType::Ship;
+        WhseShptHeader2 := WhseShptHeader;
+
+    end;
+
+    procedure NotCancelled(): Boolean
+    begin
+        EXIT(Completed);
+    end;
+
+    procedure SkipWarehouseRequest(SalesLine: Record "Sales Line"; WarehouseRequest: Record "Warehouse Request") SkipLine: Boolean;
+    begin
+        SkipLine := SalesLine."Location Code" <> WarehouseRequest."Location Code";
+        // OnAfterSkipWarehouseRequest(SalesLine, WarehouseRequest, SkipLine);
+    end;
+
+    local procedure CreateActivityFromSalesLine2ShptLine(WhseShptHeader: Record "Warehouse Shipment Header"; SalesLine: Record "Sales Line"): Boolean
+    var
+        SalesWarehouseMgt: Codeunit "Sales Warehouse Mgt.";
+        IsHandled: Boolean;
+    begin
+        IsHandled := false;
+      //  OnBeforeCreateActivityFromSalesLine2ShptLine(WhseShptHeader, SalesLine, IsHandled);
+        if IsHandled then
+            exit(true);
+
+        exit(SalesWarehouseMgt.FromSalesLine2ShptLine(WhseShptHeader, SalesLine));
+    end;
+
+    procedure SetSalesLineFilters(var SalesLine: Record "Sales Line"; WarehouseRequest: Record "Warehouse Request")
+    begin
+        SalesLine.SetRange(Type, SalesLine.Type::Item);
+        if ((WarehouseRequest.Type = WarehouseRequest.Type::Outbound) and
+            (WarehouseRequest."Source Document" = WarehouseRequest."Source Document"::"Sales Order")) or
+            ((WarehouseRequest.Type = "Warehouse Request".Type::Inbound) and
+            (WarehouseRequest."Source Document" = WarehouseRequest."Source Document"::"Sales Return Order"))
+        then
+            SalesLine.SetFilter("Outstanding Quantity", '>0')
+        else
+            SalesLine.SetFilter("Outstanding Quantity", '<0');
+        SalesLine.SetRange("Drop Shipment", false);
+        SalesLine.SetRange("Job No.", '');
+    end;
+
+    procedure CreateReceiptHeader()
+    var
+        IsHandled: Boolean;
+    begin
+        IsHandled := false;
+        // OnBeforeCreateRcptHeader(WhseReceiptHeader, "Warehouse Request", "Purchase Line", IsHandled);
+        if IsHandled then
+            exit;
+
+        WhseReceiptHeader.Init();
+        WhseReceiptHeader."No." := '';
+        WhseReceiptHeader."Location Code" := "Warehouse Request"."Location Code";
+        if Location.Code = WhseReceiptHeader."Location Code" then
+            WhseReceiptHeader."Bin Code" := Location."Receipt Bin Code";
+        WhseReceiptHeader."Vendor Shipment No." := "Warehouse Request"."External Document No.";
+        WhseReceiptLine.LockTable();
+        //  OnBeforeWhseReceiptHeaderInsert(WhseReceiptHeader, "Warehouse Request");
+        WhseReceiptHeader.Insert(true);
+        //  OnCreateReceiptHeaderOnAfterWhseReceiptHeaderInsert(WhseReceiptHeader, ActivitiesCreated, RequestType);
+        ActivitiesCreated := ActivitiesCreated + 1;
+        WhseHeaderCreated := true;
+        if not SuppressCommit then
+            Commit();
+
+        //  OnAfterCreateRcptHeader(WhseReceiptHeader, "Warehouse Request", "Purchase Line");
+    end;
+
+    // local procedure VerifySalesItemNotBlocked(SalesHeader: Record "Sales Header"; SalesLine: Record "Sales Line")
+    // var
+    //     IsHandled: Boolean;
+    // begin
+    //     OnBeforeVerifySalesItemNotBlocked(SalesHeader, SalesLine, IsHandled, SkipBlockedItem);
+    //     if not IsHandled then
+    //         VerifyItemNotBlocked(SalesLine."No.", SalesLine."Variant Code");
+    // end;
+
+    procedure CreateShptHeader()
+    begin
+
+        WhseShptHeader.INIT;
+        //EX-SMN-WMS 071119
+        //WhseShptHeader."No." := '';
+        InventorySetup.GET;
+        WhseSetup.GET;
+        //EX.CGR.011020
+        IF recTransferHeader.GET("Warehouse Request"."Source No.") THEN BEGIN
+            //EX-JFC 211221 Controlar si el pedido de transferencia es de consignacion o no
+            IF recTransferHeader."Ventas en consignacion" = TRUE THEN
+                WhseShptHeader."No." := NoSeriesMgt.GetNextNo(InventorySetup."Serie envio transf. consig.", WORKDATE, TRUE)
+            ELSE
+                WhseShptHeader."No." := NoSeriesMgt.GetNextNo(WhseSetup."Whse. Ship Nos.", WORKDATE, TRUE);
+            //EX-JFC 211221 Controlar si el pedido de transferencia es de consignacion o no
+
+            WhseShptHeader."Ship-to Name" := recTransferHeader."Ship-to Name";
+            WhseShptHeader."Ship-to Name 2" := recTransferHeader."Ship-to Name 2";
+            WhseShptHeader."Ship-to Address" := recTransferHeader."Ship-to Address";
+            WhseShptHeader."Ship-to Address 2" := recTransferHeader."Ship-to Address 2";
+            WhseShptHeader."Ship-to City" := recTransferHeader."Ship-to City";
+            WhseShptHeader."Ship-to Post Code" := recTransferHeader."Ship-to Post Code";
+            WhseShptHeader."Ship-to County" := recTransferHeader."Ship-to County";
+            WhseShptHeader."Ship-to Country/Region Code" := recTransferHeader."Ship-to Country/Region Code";
+            WhseShptHeader."Sell-to Customer Name" := recTransferHeader."Sell-to Customer Name";
+            WhseShptHeader."Sell-to Customer Name 2" := recTransferHeader."Sell-to Customer Name 2";
+            WhseShptHeader."Sell-to Address" := recTransferHeader."Sell-to Address";
+            WhseShptHeader."Sell-to Address 2" := recTransferHeader."Sell-to Address 2";
+            WhseShptHeader."Sell-to City" := recTransferHeader."Sell-to City";
+            WhseShptHeader."Sell-to Post Code" := recTransferHeader."Sell-to Post Code";
+            WhseShptHeader."Sell-to County" := recTransferHeader."Sell-to County";
+            WhseShptHeader."Sell-to Country/Region Code" := recTransferHeader."Sell-to Country/Region Code";
+            WhseShptHeader.VALIDATE("Cod. origen", recTransferHeader."Cod. cliente");
+            WhseShptHeader."Tipo de entrega" := recTransferHeader."Tipo de entrega";
+            WhseShptHeader."Cod Cliente" := recTransferHeader."Cod. cliente";
+        END ELSE BEGIN
+            IF ("Sales Header"."Document Type" = "Sales Header"."Document Type"::Order) AND ("Sales Header"."Shipping No. Series" <> '') THEN
+                WhseShptHeader."No." := NoSeriesMgt.GetNextNo("Sales Header"."Shipping No. Series", WORKDATE, TRUE); //EX-SGG-WMS 160120
+                                                                                                                     //WhseShptHeader."No." := NoSeriesMgt.GetNextNo("Sales Header"."Shipping No. Series","Sales Header"."Posting Date",TRUE);
+        END;
+        //EX-SMN-WMS FIN
+        WhseShptHeader."Location Code" := "Warehouse Request"."Location Code";
+        WhseShptLine.LOCKTABLE;
+        WhseShptHeader.INSERT(TRUE);
+        ActivitiesCreated := ActivitiesCreated + 1;
+        WhseHeaderCreated := TRUE;
+        COMMIT;
+
+        //EX-SGG-WMS 040620
+        RstTMPEnvioAlm.TRANSFERFIELDS(WhseShptHeader);
+        RstTMPEnvioAlm.INSERT;
+        //FIN EX-SGG-WMS 040620
+    end;
+
+    var
+        WhseReceiptLine: Record "Warehouse Receipt Line";
+        WhseShptLine: Record "Warehouse Shipment Line";
+        Location: Record Location;
+        Cust: Record Customer;
+        ActivitiesCreated: Integer;
+        Completed: Boolean;
+        DoNotFillQtytoHandle: Boolean;
+        SalesHeaderCounted: Boolean;
+        SkippedSourceDoc: Integer;
+        ErrorOccured: Boolean;
+        SuppressCommit: Boolean;
+
+        Text000Err: Label 'There are no Warehouse Receipt Lines created.';
+        Text001Msg: Label '%1 %2 has been created.', comment = '%1 = ActivitiesCreated %2 = WhseReceiptHeader.TableCaption() + SpecialHandlingMessage';
+        Text002Msg: Label '%1 Warehouse Receipts have been created.', comment = '%1 = ActivitiesCreated + SpecialHandlingMessage';
+        Text003Err: Label 'There are no Warehouse Shipment Lines created.';
+        Text004Msg: Label '%1 Warehouse Shipments have been created.', comment = '%1 = ActivitiesCreated + SpecialHandlingMessage';
+        Text005Err: Label 'One or more of the lines on this %1 require special warehouse handling. The %2 for such lines has been set to blank.', comment = '%1 = WhseReceiptHeader.TableCaption, %2 = WhseReceiptLine.FieldCaption("Bin Code")';
+        Text006Err: Label 'This usually happens when warehouse receipt lines have already been created for a purchase order. Or if there were no changes to the purchase order quantities since you last created the warehouse receipt lines.';
+        Text007Err: Label 'There are no new warehouse receipt lines to create';
+        Text009Err: Label 'This usually happens when Warehouse Shipment Lines have already been created for a sales %1. Or there were no changes to sales %1 quantities since you last created the warehouse shipment lines.', Comment = '%1 = Sales Order Type';
+        Text010Err: Label 'There are no new warehouse shipment lines to create';
+        NoWhseShipmLinesActionCaptionMsg: Label 'Show open lines';
+        CustomerIsBlockedMsg: Label '%1 source documents were not included because the customer is blocked.', Comment = '%1 = no. of source documents.';
+
+        WhseReceiptHeader: Record "Warehouse Receipt Header";
+        WhseShptHeader: Record "Warehouse Shipment Header";
+        LineCreated: Boolean;
+        OneHeaderCreated: Boolean;
+        WhseHeaderCreated: Boolean;
+        RequestType: Option Receive,Ship;
+        SkipBlockedCustomer: Boolean;
+        SkipBlockedItem: Boolean;
+        HideDialog: Boolean;
+        ReservedFromStock: Enum "Reservation From Stock";
+
+        EscantidadRecibida: Boolean;
+        EsCantidadAEnviar: Boolean;
+        RstTMPRecepAlm: Record "Warehouse Receipt Header";
+        RstTMPEnvioAlm: Record "Warehouse Shipment Header";
+        recTransferHeader: Record "Transfer Header";
+        InventorySetup: Record "Inventory Setup";
+        NoSeriesMgt: Codeunit NoSeriesManagement;
+        WhseSetup: Record "Warehouse Setup";
+}

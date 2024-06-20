@@ -1,0 +1,25 @@
+/// <summary>
+/// PageExtension WhseShipmentSubformExt (ID 50202) extends Record Whse. Shipment Subform //7336.
+/// </summary>
+pageextension 50202 "WhseShipmentSubformExt" extends "Whse. Shipment Subform" //7336
+{
+    layout
+    {
+        addbefore("Item No.")
+        {
+            field(ProductoBloqueado; Rec.PfsItemBlocked(true, '3'))
+            {
+                ToolTip = 'Specifies the value of the PfsItemBlocked(true, ''3'') field.';
+                //StyleExpr = PfsItemBlocked(TRUE, '3');
+                ApplicationArea = All;
+                Caption = 'PfsItemBlocked(true, ''3'')';
+            }
+            field(ClienteBloqueado; Rec.PfsCheckCustBlocked())
+            {
+                ToolTip = 'Specifies the value of the PfsCheckCustBlocked() field.';
+                ApplicationArea = All;
+                Caption = 'PfsCheckCustBlocked()';
+            }
+        }
+    }
+}
